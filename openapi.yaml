@@ -1,0 +1,189 @@
+openapi: 3.0.3
+
+info:
+  title: USSD service API
+  description: |
+    Pass-through USSD service. The USSD gateway sends a POST request to `/ussd`
+    for every user interaction. Your app responds with either `CON` (keep session
+    open) or `END` (close session and show final message).
+
+    ## Session lifecycle
+    1. User dials `*123#`
+    2. Gateway POSTs to `/ussd` with an empty `ussdString`
+    3. App responds `CON Welcome\n1. Check balance\n2. Buy airtime`
+    4. User presses `1` — gateway POSTs again with `ussdString=1`
+    5. App responds `END Your balance is GHS 42.00`
+    6. Session closes on the handset
+
+    ## Testing with Swagger UI
+    Use the **POST /ussd** endpoint below. Set `ussdString` to an empty string
+    to simulate a fresh session start.
+  version: 1.0.0
+  contact:
+    name: DevOps team
+    email: devops@example.com
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://api.yourdomain.com
+    description: Production
+
+tags:
+  - name: USSD
+    description: USSD session callback endpoint
+  - name: Health
+    description: Service health and status
+
+paths:
+  /ussd:
+    post:
+      tags: [USSD]
+      summary: Handle USSD callback
+      description: |
+        Called by the USSD gateway on every user interaction.
+        Respond within **3 seconds** or the session will time out on the handset.
+
+        Response body must start with:
+        - `CON ` — followed by the menu text (session stays open)
+        - `END ` — followed by the final message (session closes)
+      operationId: handleUssd
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UssdRequest'
+            examples:
+              session_start:
+                summary: User dials *123# (fresh session)
+                value:
+                  sessionId: AT-session-abc123
+                  serviceCode: '*123#'
+                  phoneNumber: '+233241234567'
+                  ussdString: ''
+              user_selects_1:
+                summary: User selects option 1
+                value:
+                  sessionId: AT-session-abc123
+                  serviceCode: '*123#'
+                  phoneNumber: '+233241234567'
+                  ussdString: '1'
+              user_selects_2:
+                summary: User selects option 2
+                value:
+                  sessionId: AT-session-abc123
+                  serviceCode: '*123#'
+                  phoneNumber: '+233241234567'
+                  ussdString: '2'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UssdRequest'
+      responses:
+        '200':
+          description: USSD menu or final response
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/UssdResponse'
+              examples:
+                continue_menu:
+                  summary: Show main menu (session continues)
+                  value: "CON Welcome to MyService\n1. Check balance\n2. Buy airtime\n3. Exit"
+                end_message:
+                  summary: Final message (session ends)
+                  value: "END Your balance is GHS 42.00. Thank you."
+                invalid_input:
+                  summary: Invalid option (session ends)
+                  value: "END Invalid option. Please try again."
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Used by CI/CD pipeline to verify the service started correctly after deploy.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                uptime: 3600
+                timestamp: '2026-05-21T10:00:00.000Z'
+        '503':
+          description: Service is unhealthy
+
+components:
+  schemas:
+    UssdRequest:
+      type: object
+      required:
+        - sessionId
+        - serviceCode
+        - phoneNumber
+        - ussdString
+      properties:
+        sessionId:
+          type: string
+          description: Unique session ID assigned by the gateway
+          example: AT-session-abc123
+        serviceCode:
+          type: string
+          description: The USSD code the user dialed
+          example: '*123#'
+        phoneNumber:
+          type: string
+          description: Caller's phone number in E.164 format
+          example: '+233241234567'
+        ussdString:
+          type: string
+          description: |
+            Everything the user has typed so far in this session,
+            joined by `*`. Empty string on first request.
+          example: '1*2'
+
+    UssdResponse:
+      type: string
+      description: |
+        Plain text response starting with `CON ` (continue) or `END ` (terminate).
+        Use `\n` to separate menu lines on the handset display.
+      example: "CON Welcome\n1. Check balance\n2. Exit"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        uptime:
+          type: number
+          description: Server uptime in seconds
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Missing required field: sessionId
+        code:
+          type: integer
+          example: 400
