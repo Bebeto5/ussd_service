@@ -1,0 +1,5 @@
+extends: spectral:oas
+rules:
+  operation-operationId: warn
+  operation-singular-get-operationId: warn
+  operation-tag-defined: warn
